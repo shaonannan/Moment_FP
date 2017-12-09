@@ -282,6 +282,10 @@ StatV = StatData()
 (fE,etaE,fI,etaI) = (0.028,1.60,0.028,1.75)#(0.0135,3.8,0.0132,3.5)
 (fON,etaON,fOFF,etaOFF) = (0,0,0,0)#(0.0135,3.8,0.0132,3.5)
 
+(tauon0,tauon1,tauoff0,tauoff1,tonset,tdelay) = (0.014,0.056,0.014/0.056*0.036,0.036)*100.0
+(Son,Soff,rinh) = (0.013,0.013,0.5)
+(brt,drk)       = (1.7,1.7)
+
 # Vbin
 V = np.linspace(V_start,V_end,N_divide)
 V = np.transpose(V)
@@ -296,6 +300,10 @@ h = V[1]-V[0]
 # External and LGN feedforward,fast input
 (Ext.fE,Ext.etaE,Ext.fI,Ext.etaI) = (fE,etaE,fI,etaI)
 (Ext.fON,Ext.etaON,Ext.fOFF,Ext.etaOFF) = (fE,etaE,fI,etaI)
+
+(Ext.tauon0,Ext.tauon1,Ext.tauoff0,Ext.tauoff1,Ext.tonset,Ext.tdelay) = (tauon0,tauon1,tauoff0,tauoff1,tonset,tdelay)
+(Ext.Son,Ext.Soff,Ext.rinh,Ext.brt,Ext.drk) = (Son,Soff,rinh,brt,drk)
+
 # PUT TOGETHER
 
 
