@@ -9,12 +9,12 @@ import numpy as np
 from numpy.matlib import repmat
 import scipy.stats
 import matplotlib.pyplot as plt
-from ipywidgets import interact
 from scipy.signal import convolve2d
 from scipy.ndimage import gaussian_filter
 from io import StringIO
 from scipy import special
 from scipy.optimize import minimize
+from scipy import sparse
 
 
 class ExtData:
@@ -44,25 +44,60 @@ class ExtData:
 
 class StatData:
     def __init__(self):
-        self.vbarE = None
-        self.vbarI = None
-        self.wbarE = None
-        self.wbarI = None
-        self.vbar3E = None
-        self.vbar3I = None
-        self.vbar4E = None
-        self.vbar4I = None
+        # COMMON FOR EE/EI/IE/II(ONE SPIKE) AND BKG+LGN(ONE SPIKE)
+        # SEE/EI/IE/II
+        self.LEE_kick = None
+        self.LEE_fire = None
+        self.LEE_undr = None
         
-        self.VEs    = None
-        self.VIs    = None
-        self.DE     = None
-        self.DI     = None
+        self.LEI_kick = None
+        self.LEI_fire = None
+        self.LEI_undr = None
+        
+        self.LIE_kick = None
+        self.LIE_fire = None
+        self.LIE_undr = None
+        
+        self.LII_kick = None
+        self.LII_fire = None
+        self.LII_undr = None
+        
+        # BKG
+        self.LEY_kick = None
+        self.LEY_fire = None
+        self.LEY_undr = None
+        
+        self.LIY_kick = None
+        self.LIY_fire = None
+        self.LIY_undr = None
+        
+        # LGN
+        self.LEL_kick = None
+        self.LEL_fire = None
+        self.LEL_undr = None
+        
+        self.LIL_kick = None
+        self.LIL_fire = None
+        self.LIL_undr = None
+        
+        # CHANGABLE L_FLOW
+        self.LE_flow  = None
+        self.LI_flow  = None
+        
+        # RHO-DISTRIBUTION
+        self.rE       = None
+        self.rI       = None
 
 
 class RecData:
     def __init__(self):
-        self.mE = None
-        self.mI = None
+        
+        # THE ABILITY TO GIVE OTHER APPROPRIATE EXT/INH SYNAPTIC INPUT
+        self.mEE = None
+        self.mIE = None
+        self.mEI = None
+        self.mII = None
+        
         self.SEE = 0.0
         self.SEI = 0.0
         self.SIE = 0.0
@@ -73,8 +108,10 @@ class RecData:
         self.LEEF = 0.0
         self.LIEF = 0.0
         
+        # LONG-RANGE LATERAL CONNECTION
         self.Adis = None
-        self.In   = None
+        self.INE  = None
+        self.INI  = None
         
 class NetParams:
     def __init__(self):
@@ -183,78 +220,42 @@ def LGN_OnOff(NetParams,Ext,t):
     # print 't: ',ton_clock,' ; value: ', lgnbrt , lgndrk
     return Ext
      
-     
-    
             
-def VQs(Ext,Rec,NetParams):
+def Inmdas(Ext,Rec,NetParams):
     # EXTRACT FR 
     (etaE,etaI,fE,fI,etaON,etaOFF,fON,fOFF) = (Ext.etaE,Ext.etaI,Ext.fE,Ext.fI,Ext.etaON,Ext.etaOFF,Ext.fON,Ext.fOFF)
-    (mE,mI,In,SEE,SEI,SIE,SII,LEE,LIE,LEEF,LIEF) = (Rec.mE,Rec.mI,Rec.In,Rec.SEE,Rec.SEI,Rec.SIE,
-                                                    Rec.SII,Rec.LEE,Rec.LIE,Rec.LEEF,Rec.LIEF)
-    (vL,gL,dt,tauN,NHYP) = (NetParams.vL,NetParams.gL,NetParams.dt,NetParams.tauN,NetParams.NHYP)
+    # CONNECTIONS
+    (SEE,SEI,SIE,SII,LEE,LIE,LEEF,LIEF) = (Rec.SEE,Rec.SEI,Rec.SIE,Rec.SII,Rec.LEE,Rec.LIE,Rec.LEEF,Rec.LIEF)
+    # ABILITY TO GIVE
+    (mEE,mIE,mEI,mII,INE,INI) = (Rec.mEE,Rec.mIE,Rec.mIE,Rec.mII,Rec.INE,Rec.INI)
+    (vL,gL,dt,tauN,NHYP,NE,NI) = (NetParams.vL,NetParams.gL,NetParams.dt,NetParams.tauN,NetParams.NHYP,NetParams.NE,NetParams.NI)
+    
     # CALCULATE $i_{NMDA}(lT+T)$
-    INMDA = np.zeros_like(In)
+    (INMDAE,INMDAI) = (np.zeros_like(INE),np.zeros_like(INI))
     """
     for i in range(NHYP):
         # Exc<-Exc
         INMDA[i,0] = np.sum(LEE*mE*(1-np.exp(-dt/tauN))) - LEE*mE[i,0]*(1-np.exp(-dt/tauN))
         INMDA[i,1] = np.sum(LIE*mE*(1-np.exp(-dt/tauN))) - LIE*mE[i,0]*(1-np.exp(-dt/tauN))
     """
+    hEEL = mEE/(NE-1)*NE  # cross hypercolumns -->NE
+    hEEL1 = mIE/(NE)*NE
+    # print 'hEEL',hEEL,'hEEL1',hEEL1
+    hIEL = mIE/(NE-0)*NE
     Adis = Rec.Adis
     # Adis*mE/I equals to summation, shape of result-matrix should be [NHYP,1]
-    INMDA[:,0] = LEE*np.squeeze(np.dot(Adis,mE))*(1-np.exp(-dt/tauN))
-    INMDA[:,1] = LIE*np.squeeze(np.dot(Adis,mE))*(1-np.exp(-dt/tauN))
+    INMDAE = LEE*np.squeeze(np.dot(Adis,hEEL))*(1-np.exp(-dt/tauN))
+    INMDAI = LIE*np.squeeze(np.dot(Adis,hIEL))*(1-np.exp(-dt/tauN))
     
-    In = In*np.exp(-dt/tauN) + INMDA
-    
-    # CALCULATE LGN FEEDFORWARD INPUT
-    # ENUMERATE all REGIONS RECEIVING BRIGHTER STM
-    brtenum = Net.brtID
-    (brtinp,brtv)  = (np.zeros([NHYP,1]),Ext.lgnbrt)
-    drkenum = Net.drkID
-    (drkinp,drkv)  = (np.zeros_like(brtinp),Ext.lgndrk)
-    (fElgn,fIlgn)  = (Net.fElgn,Net.fIlgn)
-    for idb in brtenum:
-        brtinp[idb,0] = brtv
-    for idd in drkenum:
-        drkinp[idd,0] = drkv
-    
-        
-    """
-    VEs = (vL*gL+etaE*fE+SEE*mE-SEI*mI)/gL  # DO NOT TAKE LR INTO CONSIDERATION
-    VIs = (vL*gL+etaI*fI+SIE*mE-SII*mI)/gL
-    """
-    """
-    VEs = (vL*gL+etaE*fE+SEE*mE-SEI*mI+np.reshape(np.squeeze(In[:,0]),[NHYP,1]))/gL  # DO NOT TAKE LR INTO CONSIDERATION
-    VIs = (vL*gL+etaI*fI+SIE*mE-SII*mI+np.reshape(np.squeeze(In[:,1]),[NHYP,1]))/gL 
-    """
-    VEs = (vL*gL+etaE*fE+SEE*mE+-SEI*mI+np.reshape(np.squeeze(In[:,0]),[NHYP,1])+fElgn*(brtinp+drkinp))/gL    
-    VIs = (vL*gL+etaI*fI+SIE*mE-SII*mI+np.reshape(np.squeeze(In[:,1]),[NHYP,1])+fIlgn*(brtinp+drkinp))/gL 
-    """
-    if(VEs[1]>1e5):
-        print 'brtinp', brtinp,'drkinp',drkinp
-        print 'me',mE,'mi',mI
-        print 'Inmda',In
-    """
+    INE = INE*np.exp(-dt/tauN) + INMDAE
+    INI = INI*np.exp(-dt/tauN) + INMDAI
 
+    return (INE,INI)
 
-    """      
-    if VEs[0]>10:
-        print 'mE: ',mE
-        print 'mI: ',mI
-        print 'inp: ',brtinp,drkinp
-    """
-    
-    # print 'SHAPE VE: ',np.shape(VEs)
-    # print 'SHAPE VI: ',np.shape(VIs)
-    return (VEs,VIs,In)
-
-def DQs(Ext,Rec,NetParams):
+def ffinputs(Ext,Rec,NetParams):
     # EXTRACT FR 
     (etaE,etaI,fE,fI,etaON,etaOFF,fON,fOFF) = (Ext.etaE,Ext.etaI,Ext.fE,Ext.fI,Ext.etaON,Ext.etaOFF,Ext.fON,Ext.fOFF)
-    (mE,mI,In,SEE,SEI,SIE,SII,LEE,LIE,LEEF,LIEF) = (Rec.mE,Rec.mI,Rec.In,Rec.SEE,Rec.SEI,Rec.SIE,
-                                                    Rec.SII,Rec.LEE,Rec.LIE,Rec.LEEF,Rec.LIEF)
-    (vL,gL,dt,tauN,NE,NI) = (NetParams.vL,NetParams.gL,NetParams.dt,NetParams.tauN,NetParams.NE,NetParams.NI)
+    (vL,gL,dt,tauN,NHYP) = (NetParams.vL,NetParams.gL,NetParams.dt,NetParams.tauN,NetParams.NHYP)
     
     # CALCULATE LGN FEEDFORWARD INPUT
     # ENUMERATE all REGIONS RECEIVING BRIGHTER STM
@@ -267,90 +268,12 @@ def DQs(Ext,Rec,NetParams):
         brtinp[idb,0] = brtv
     for idd in drkenum:
         drkinp[idd,0] = drkv
+        
+    LGNff = np.zeros_like(drkinp)
+    LGNff = drkinp+brtinp
     
-    # IGNORE $\sigma i_N$
-    DE = (etaE*np.square(fE)+mE*np.square(SEE)/NE+mI*np.square(SEI)/NI+(brtinp+drkinp)*np.square(fElgn))/gL
-    DI = (etaI*np.square(fI)+mE*np.square(SIE)/NE+mI*np.square(SII)/NI+(brtinp+drkinp)*np.square(fIlgn))/gL
-    # return (DE+0.010,DI+0.010)
-    return (DE,DI)
+    return (LGNff,brtinp,drkinp)
 
-def rho_EQ(Vs,D,V):
-    
-    Rv = np.copy(V)
-    (vT,vR) = (1.0,0.0)
-    tmpg = np.greater(V,vR)
-    indp = (np.where(tmpg))
-    sqrtD  = np.sqrt(D)
-
-    
-    intovT  = special.dawsn((vT-Vs)/sqrtD)*np.exp(np.square(vT-Vs)/D)
-    intovSD = special.dawsn(-Vs/sqrtD)*np.exp(np.square(Vs)/D)
-
-    # compute R with V>vR case:
-    Rv[indp] = -special.dawsn((V[indp]-Vs)/sqrtD)+np.exp(-np.square(V[indp]-Vs)/D)*intovT
-    if(indp[0][0]>1):
-        Rv[0:indp[0][0]] = np.exp(-np.square(V[0:indp[0][0]]-Vs)/D)*(-intovSD + intovT)
-    
-    tmpl = np.less(V,-2.0/3.0)
-    indp = np.where(tmpl)
-    Rv[indp] = 0.0
-    sum_c = (V[2]-V[1])*np.sum(Rv)
-    """
-    if np.isnan(sum_c):
-        print 'SUM_C', sum_c
-        print 'Error!'
-        print 'Vs:', Vs,'D:',D
-        pause(10)
-    """
-    # print 'sum_c',sum_c
-    Rv = Rv/sum_c
-    
-    return (Rv,sum_c)
-
-def solveVbarWbar4(NetParams,StatV,Rec):
-    # EXTRACT STATE VARIABLES
-    (dt,gL) = (NetParams.dt,NetParams.gL)
-    (vbarE,wbarE,vbar3E,vbar4E) = (StatV.vbarE,StatV.wbarE,StatV.vbar3E,StatV.vbar4E)
-    (vbarI,wbarI,vbar3I,vbar4I) = (StatV.vbarI,StatV.wbarI,StatV.vbar3I,StatV.vbar4I)
-    (VEs,VIs,DE,DI) = (StatV.VEs,StatV.VIs,StatV.DE,StatV.DI)
-    (mE,mI) = (Rec.mE,Rec.mI)
-    # print 'mE,mI',mE,mI
-    
-    dtgL = dt*gL
-    vbarE1 = vbarE + dtgL*(- mE/gL - (vbarE - VEs));
-    vbarI1 = vbarI + dtgL*(- mI/gL - (vbarI - VIs));
-    
-
-    wbarE1 = wbarE + dtgL*(- mE/gL - 2.0*(wbarE - VEs*vbarE - 0.5*DE));
-    wbarI1 = wbarI + dtgL*(- mI/gL - 2.0*(wbarI - VIs*vbarI - 0.5*DI));
-    # print 'Wbar',wbarE,wbarI
-
-    vbar3E1 = vbar3E + dtgL*(- mE/gL - 3.0*(vbar3E - VEs*wbarE - DE*vbarE));
-    vbar3I1 = vbar3I + dtgL*(- mI/gL - 3.0*(vbar3I - VIs*wbarI - DI*vbarI));
-
-    vbar4E1 = vbar4E + dtgL*(- mE/gL - 4.0*(vbar4E - VEs*vbar3E - 1.5*DE*wbarE));
-    vbar4I1 = vbar4I + dtgL*(- mI/gL - 4.0*(vbar4I - VIs*vbar3I - 1.5*DI*wbarI));
-    return (vbarE1,vbarI1,wbarE1,wbarI1,vbar3E1,vbar3I1,vbar4E1,vbar4I1)
-
-def optfun(lambda_u,mu,x,Pq,fin,gamma):
-    lambda_u = lambda_u[:]
-    k  = np.size(mu)
-    # mu = np.reshape(mu,[k,1])
-    tt = np.zeros(k+1)
-    tt[0] = 1
-    tt[1:k+1]  = mu[:]
-    # print 'mu: ',tt
-    dx = x[1]-x[0]
-    # print 'dx: ',dx,'lambda: ',lambda_u
-    # print 'lambda: ', lambda_u
-    # lambda_u = lambda0[:]
-    N  =np.size(lambda_u)
-    # print N,np.shape(fin)
-    
-    p  = Pq*np.exp(np.dot(fin[:,0:N],lambda_u))
-    f  = dx*np.sum(p)-np.dot(np.reshape(tt,[1,k+1]),lambda_u)   
-    # print 'f: ',f
-    return f
  
 def get_L_flow(NetParams,Rec,Vedges,Inmda):
     (gL,vL,N_divide,V,NHYP) = (NetParams.gL,NetParams.vL,NetParams.N_divide,NetParams.V,NetParams.NHYP)
@@ -372,8 +295,8 @@ def get_L_flow(NetParams,Rec,Vedges,Inmda):
         Vpos = Vedges[j+1]*egt + vLn*(1-egt)
         # print Vpre,Vpos
         # Vbin [Vpre Vpos] means edges:
-        jpre = (Vpre-(vL-vT))/dV + 1
-        jpos = (Vpos-(vL-vT))/dV + 1
+        jpre = (Vpre-(vL-vT))/dV # from 0!!! delete '+ 1'
+        jpos = (Vpos-(vL-vT))/dV # from 0!!! delete '+ 1'
         # print jpre,jpos
         # integer
         jmin = np.floor(jpre)
@@ -391,13 +314,14 @@ def get_L_flow(NetParams,Rec,Vedges,Inmda):
         wmax = jpos-(jmax-1)
         # print wmin,wmax
         wvec = np.ones([np.size(bvec),1])
-        wvec[0,0]  = wmin
-        wvec[-1,0] = wmax
+        if(np.size(bvec)>0):
+            wvec[0,0]  = wmin
+            wvec[-1,0] = wmax
 
 
         rvec = j*np.ones([np.size(bvec),1])
         # find effective
-        tmp = (np.less_equal(bvec,nbins)&np.greater(bvec,0))
+        tmp = (np.less(bvec,nbins)&np.greater_equal(bvec,0))
         vij = np.where(tmp)
 
 
@@ -409,7 +333,7 @@ def get_L_flow(NetParams,Rec,Vedges,Inmda):
     col_ra = col_ra.flatten()
     val_ra = val_ra.flatten()
     # print col_ra[-1],nbins
-    L_flow = sparse.coo_matrix((val_ra,(row_ra,col_ra)),shape=(nbins+1,nbins+1))
+    L_flow = sparse.coo_matrix((val_ra,(row_ra,col_ra)),shape=(nbins,nbins))
     L_flow = L_flow.toarray()
     return L_flow
 
@@ -431,8 +355,8 @@ def get_L_kick(NetParams,Rec,Vedges,kick_val):
         Vpos = Vedges[j+1]-kick_val
         # print Vpre,Vpos
         # Vbin [Vpre Vpos] means edges:
-        jpre = (Vpre-(vL-vT))/dV + 1
-        jpos = (Vpos-(vL-vT))/dV + 1
+        jpre = (Vpre-(vL-vT))/dV # from 0!!! delete '+ 1'
+        jpos = (Vpos-(vL-vT))/dV # from 0!!! delete '+ 1'
         # print jpre,jpos
         # integer
         jmin = np.floor(jpre)
@@ -454,11 +378,11 @@ def get_L_kick(NetParams,Rec,Vedges,kick_val):
             wvec[0,0]  = wmin
             wvec[-1,0] = wmax
             rvec = j*np.ones([np.size(bvec),1])
-        else if(np.size(bvec)==1):
+        elif(np.size(bvec)==1):
             wvec = np.ones([1,1])
             rvec = j*np.ones([np.size(bvec),1])
         # find effective
-        tmp = (np.less_equal(bvec,nbins)&np.greater(bvec,0))
+        tmp = (np.less(bvec,nbins)&np.greater_equal(bvec,0))
         vij = np.where(tmp)
 
 
@@ -469,26 +393,33 @@ def get_L_kick(NetParams,Rec,Vedges,kick_val):
     row_ra = row_ra.flatten()
     col_ra = col_ra.flatten()
     val_ra = val_ra.flatten()
-    # print col_ra[-1],nbins
-    L_kick = sparse.coo_matrix((val_ra,(row_ra,col_ra)),shape=(nbins+1,nbins+1))
+    print col_ra[-1],val_ra[-1],nbins
+    
+    L_kick = sparse.coo_matrix((val_ra,(row_ra,col_ra)),shape=(nbins,nbins))
     L_kick = L_kick.toarray()
     return L_kick
 
+
+
+
+"""
+START OUR ALGORITHM!
+"""
 Ext = ExtData()
 Rec = RecData()
 Net = NetParams()
 StatV = StatData()
 # NETWORK STRUCTURE
-(NE,NI,NHYP) = (100,100,3) #(300,100,3)
-(vL,gL,V_start,V_end,N_divide) = (0.0,0.05,-1.0,1.0,1025)
-j_source = (N_divide+1)/2
-(dt,tauN,Final_time,step) = (0.1,80.0,350.0,0)
+(NE,NI,NHYP) = (100,100,3)# (100,100,3) #(300,100,3)
+(vL,gL,V_start,V_end,N_divide) = (0.0,0.05,-1.0,1.0,3026)# (0.0,0.05,-1.0,1.0,1025) # N_divide -->nbinp,nbins -->nbinp-1
+j_source = (N_divide)/2-1   # from 0!!!
+(dt,tauN,Final_time,step) = (0.01,80.0,350.0,0)
 # connectivity matrix for individual hyper-column
-(SEE,SEI,SIE,SII) = (0.678,0.481,0.583,0.128)#(0.16,0.46,0.52,0.24)
-(LEE,LIE)         = (1.40/1.0,1.920/1.0)
+(SEE,SEI,SIE,SII) = (0.678/NE,0.481/NI,0.583/NE,0.128/NI)#(0.5/NE,0.55/NE,0.3/NI,0.0) # (0.678,0.481,0.583,0.128)#(0.16,0.46,0.52,0.24)
+(LEE,LIE)         = (1.40/1.0/NE/(NHYP-1),1.920/1.0/NE/(NHYP-1))#(0.0,0.0) # (1.40/1.0,1.920/1.0)
 # External and LGN feedforward,fast input
-(fE,etaE,fI,etaI) = (0.054,0.57,0.052,0.55)#(0.0135,3.8,0.0132,3.5)
-(fON,etaON,fOFF,etaOFF) = (0,0.150,0,0.150)#(0.0135,3.8,0.0132,3.5)
+(fE,etaE,fI,etaI) = (0.054,0.57,0.052,0.55)#(0.05,2.4,0.05,1.8)# (0.054,0.57,0.052,0.55)#(0.0135,3.8,0.0132,3.5)
+(etaON,etaOFF) = (3.8,3.5)#(0.150,0.150)#(0.0135,3.8,0.0132,3.5)
 
 (tauon0,tauon1,tauoff0,tauoff1) = (0.014*1000,0.056*1000,0.014/0.056*0.036*1000,0.036*1000)
 (tonset,tdelay,tkeep) = (80.0,30.0,10.0)
@@ -504,7 +435,10 @@ Rec.Adis = Adis
 # Vbin
 V = np.linspace(V_start,V_end,N_divide)
 V = np.transpose(V)
+Vedges = np.reshape(V,[N_divide,1])
 h = V[1]-V[0]
+# IN THIS ALGORITHM, V REPRESENTS VEDGES AND N_DIVIDE -- NBINP
+# NBINS = LENGTH(V)-1 -- NBINP-1
 
 # NETWORK STRUCTURE
 (Net.NE,Net.NI,Net.NHYP) = (NE,NI,NHYP)
@@ -523,58 +457,170 @@ Net.j_source = j_source
 
 # PUT TOGETHER
 
+# MEE/EI/IE/II/INMDA REPREsENT INFO. RECEIVED
+mEE = np.zeros([NHYP,1])
+(mEI,mIE,mII) = (np.zeros_like(mEE),np.zeros_like(mEE),np.zeros_like(mEE))
+(INE,INI) = (np.zeros([NHYP,1]),np.zeros([NHYP,1]))
 
-# New narray
-mE = np.zeros([NHYP,1])
-mI = np.zeros_like(mE)
-In = np.zeros([NHYP,2]) # Inh<-Exc or Exc<-Exc
-# PUT TOGETHER
-Rec.mE = mE
-Rec.mI = mI
-Rec.In = In
-gammaE = np.zeros([NHYP,5])
-gammaI = np.zeros_like(gammaE)
+(Rec.mEE,Rec.mEI,Rec.mIE,Rec.mII,Rec.INE,Rec.INI) = (mEE,mEI,mIE,mII,INE,INI)
 
-# rho and rho
-rho_source = np.zeros([NHYP,....])
-rho_source =...
 
 # current-based, unchanged for SEE/SEI/SIE/SII/ETAE/ETAOI
-# EXTERNAL/LGN INPUT common
+# EXTERNAL/BACKGROUND INPUT common
 LEY_kick = get_L_kick(Net,Rec,Vedges,fE)
-LEY_fire = 1-np.transpose(np.sum(LEY_kick,axis=0))
-LEY_undr = np.transpose(sum(LEY_kick,axis = 0))
+LEY_fire = 1-np.reshape(np.sum(LEY_kick,axis=0),[N_divide-1,1])
+LEY_undr = np.reshape(np.sum(LEY_kick,axis = 0),[N_divide-1,1])
 
 LIY_kick = get_L_kick(Net,Rec,Vedges,fI)
-LIY_fire = 1-np.transpose(np.sum(LIY_kick,axis=0))
-LIY_undr = np.transpose(sum(LIY_kick,axis = 0))
+LIY_fire = 1-np.reshape(np.sum(LIY_kick,axis=0),[N_divide-1,1])
+LIY_undr = np.reshape(np.sum(LIY_kick,axis = 0),[N_divide-1,1])
+# LGN INPUT COMMON
+LEL_kick = get_L_kick(Net,Rec,Vedges,fElgn)
+LEL_fire = 1-np.reshape(np.sum(LEL_kick,axis=0),[N_divide-1,1])
+LEL_undr = np.reshape(np.sum(LEL_kick,axis = 0),[N_divide-1,1])
+
+LIL_kick = get_L_kick(Net,Rec,Vedges,fIlgn)
+LIL_fire = 1-np.reshape(np.sum(LIL_kick,axis=0),[N_divide-1,1])
+LIL_undr = np.reshape(np.sum(LIL_kick,axis = 0),[N_divide-1,1])
+
 # SHORT-RANGE INPUT COMMON
 LEE_kick = get_L_kick(Net,Rec,Vedges,SEE)
-LEE_fire = 1-np.transpose(np.sum(LEE_kick,axis=0))
-LEE_undr = np.transpose(sum(LEE_kick,axis=0))
+LEE_fire = 1-np.reshape(np.sum(LEE_kick,axis=0),[N_divide-1,1])
+LEE_undr = np.reshape(np.sum(LEE_kick,axis=0),[N_divide-1,1])
 
 LEI_kick = get_L_kick(Net,Rec,Vedges,-SEI)
-LEI_fire = 1-np.transpose(np.sum(LEI_kick,axis=0))
-LEI_undr = np.transpose(sum(LEI_kick,axis=0))
+LEI_fire = 1-np.reshape(np.sum(LEI_kick,axis=0),[N_divide-1,1])
+LEI_undr = np.reshape(np.sum(LEI_kick,axis=0),[N_divide-1,1])
 
 LIE_kick = get_L_kick(Net,Rec,Vedges,SIE)
-LIE_fire = 1-np.transpose(np.sum(LIE_kick,axis=0))
-LIE_undr = np.transpose(sum(LIE_kick,axis=0))
+LIE_fire = 1-np.reshape(np.sum(LIE_kick,axis=0),[N_divide-1,1])
+LIE_undr = np.reshape(np.sum(LIE_kick,axis=0),[N_divide-1,1])
 
 LII_kick = get_L_kick(Net,Rec,Vedges,-SII)
-LII_fire = 1-np.transpose(np.sum(LII_kick,axis=0))
-LII_undr = np.transpose(sum(LII_kick,axis=0))
+LII_fire = 1-np.reshape(np.sum(LII_kick,axis=0),[N_divide-1,1])
+LII_undr = np.reshape(np.sum(LII_kick,axis=0),[N_divide-1,1])
 
 
+# INITIAL RHO-SOURCE
 
+var1 = pow((5/3/250.0),2)
+source = np.exp(-np.square(V[1:]-0.0)/var1/2.0)/np.sqrt(2.0*np.pi*var1)
+source = source/(h*np.sum(source))
+rho_source = np.reshape(source,[N_divide-1,1]) # identical to moment
+j_source = np.int(j_source)
+"""
+j_source = np.int(j_source)
+rho_source = np.zeros([N_divide-1,1])
+rho_source[j_source,0] = 1
+"""
+# rho and rho and others
+rE = np.zeros([np.size(V)-1,NHYP])
+rI = np.zeros_like(rE)
+# INITIALIZATION
+for i in range(NHYP):
+    rE[:,i] = rho_source[:,0]
+    rI[:,i] = rho_source[:,0]
 
+# SAVE 
+(StatV.LEE_fire,StatV.LEE_kick,StatV.LEE_undr) = (LEE_fire,LEE_kick,LEE_undr)
+(StatV.LEI_fire,StatV.LEI_kick,StatV.LEI_undr) = (LEI_fire,LEI_kick,LEI_undr)
+(StatV.LIE_fire,StatV.LIE_kick,StatV.LIE_undr) = (LIE_fire,LIE_kick,LIE_undr)
+(StatV.LII_fire,StatV.LII_kick,StatV.LII_undr) = (LII_fire,LII_kick,LII_undr)
 
+(StatV.LEY_fire,StatV.LEL_kick,StatV.LEY_undr) = (LEY_fire,LEY_kick,LEY_undr)
+(StatV.LEL_fire,StatV.LEI_kick,StatV.LEL_undr) = (LEL_fire,LEL_kick,LEL_undr)
 
+(StatV.LIY_fire,StatV.LIY_kick,StatV.LIY_undr) = (LIY_fire,LIY_kick,LIY_undr)
+(StatV.LIL_fire,StatV.LIL_kick,StatV.LIL_undr) = (LIL_fire,LIL_kick,LIL_undr)
 
+(StatV.rE,StatV.rI) = (rE,rI)
+
+(rEY_fire,rEL_fire,rEI_fire,rEE_fire) = (np.zeros(NHYP),np.zeros(NHYP),np.zeros(NHYP),np.zeros(NHYP))
+(rIY_fire,rIL_fire,rII_fire,rIE_fire) = (np.zeros(NHYP),np.zeros(NHYP),np.zeros(NHYP),np.zeros(NHYP))
+(me_single,mi_single) = (np.zeros(NHYP),np.zeros(NHYP))
+
+# CHANGABLE L_FLOW INITIATION
+LE_flow = np.zeros([NHYP,(N_divide-1),(N_divide-1)])
+LI_flow = np.zeros_like(LE_flow)
+# INITIALIZATION, VLN = VL
+for i in range(NHYP):
+    LE_flow[i,:,:] = get_L_flow(Net,Rec,V,np.squeeze(INE[i,0]))
+    LI_flow[i,:,:] = get_L_flow(Net,Rec,V,np.squeeze(INI[i,0]))
+(StatV.LE_flow,StatV.LI_flow) = (LE_flow,LI_flow)
 
 """
 DOING ITERATION AND OBTAINING RESULTS
 """
-while (t< Final_time):
-    for i in range(NHP):
+counter_dt = 0
+t = counter_dt*dt
+while (t< 300):#Final_time):
+    Ext = LGN_OnOff(Net,Ext,t)
+    (LGNff,brt,drk) = ffinputs(Ext,Rec,Net)
+    for i in range(NHYP):
+        etaEL = LGNff[i,0]
+        etaIL = LGNff[i,0]
+        # EXCITATORY POPULATION
+        gamma1 = np.power(np.dot(np.transpose(LEE_undr),rE[:,i]),(NE-1))
+        gamma2 = np.power(np.dot(np.transpose(LIE_undr),rI[:,i]),(NI))
+        # gamma_E = gamma1*gamma2
+        gamma_E = 1.0
+        rE[:,i]     = np.squeeze(np.dot(np.squeeze(LE_flow[i,:,:]),np.reshape(rE[:,i],[N_divide-1,1])))
+        rEY_fire[i] = dt*etaE*np.dot(np.reshape(LEY_fire,[1,(N_divide-1)]),np.reshape(rE[:,i],[N_divide-1,1]))*gamma_E
+        rEL_fire[i] = dt*etaEL*np.dot(np.reshape(LEL_fire,[1,(N_divide-1)]),np.reshape(rE[:,i],[N_divide-1,1]))*gamma_E
+        rEI_fire[i] = dt*mEI[i]*np.dot(np.reshape(LEI_fire,[1,(N_divide-1)]),np.reshape(rE[:,i],[N_divide-1,1]))
+        rEE_fire[i] = dt*mEE[i]*np.dot(np.reshape(LEE_fire,[1,(N_divide-1)]),np.reshape(rE[:,i],[N_divide-1,1]))
+        rE[:,i]     = np.squeeze((1-dt*(mEI[i]))*np.reshape(rE[:,i],[N_divide-1,1]) - dt*etaE*(LEY_undr*np.reshape(rE[:,i],[N_divide-1,1])) - dt*etaE*gamma_E*(LEY_fire*np.reshape(rE[:,i],[N_divide-1,1]))
+        - dt*mEE[i]*(LEE_undr*np.reshape(rE[:,i],[N_divide-1,1])) -dt*mEE[i]*(LEE_fire*np.reshape(rE[:,i],[N_divide-1,1]))# 
+        + dt*(etaE*np.dot(LEY_kick,np.reshape(rE[:,i],[N_divide-1,1])) + mEE[i]*np.dot(LEE_kick,np.reshape(rE[:,i],[N_divide-1,1])) + mEI[i]*np.dot(LEI_kick,np.reshape(rE[:,i],[N_divide-1,1]))))
+        - dt*etaEL*(LEL_undr*np.reshape(rE[:,i],[N_divide-1,1])) - dt*etaEL*gamma_E*(LEL_fire*np.reshape(rE[:,i],[N_divide-1,1]))
+        + dt*(etaEL*np.dot(LEL_kick,np.reshape(rE[:,i],[N_divide-1,1])))
+        
+        rE[j_source,i] = rE[j_source,i] + rEY_fire[i] + rEL_fire[i] + rEI_fire[i] + rEE_fire[i]# 
+        
+        
+        # INHIBITORY POPULATION
+        rI[:,i]     = np.squeeze(np.dot(np.squeeze(LI_flow[i,:,:]),np.reshape(rI[:,i],[N_divide-1,1])))
+        rIY_fire[i] = dt*etaI*np.dot(np.reshape(LIY_fire,[1,N_divide-1]),np.reshape(rI[:,i],[N_divide-1,1]))*1.0 # gamma_I = 1.0
+        rIL_fire[i] = dt*etaIL*np.dot(np.reshape(LIL_fire,[1,(N_divide-1)]),np.reshape(rE[:,i],[N_divide-1,1]))
+        rII_fire[i] = dt*mII[i]*np.dot(np.reshape(LII_fire,[1,N_divide-1]),np.reshape(rI[:,i],[N_divide-1,1]))
+        rIE_fire[i] = dt*mIE[i]*np.dot(np.reshape(LIE_fire,[1,N_divide-1]),np.reshape(rI[:,i],[N_divide-1,1]))
+        rI[:,i]     = np.squeeze((1-dt*(mII[i]))*np.reshape(rI[:,i],[N_divide-1,1]) - dt*etaI*(LIY_fire*np.reshape(rI[:,i],[N_divide-1,1])) - dt*etaI*(LIY_undr*np.reshape(rI[:,i],[N_divide-1,1]))
+        - dt*mIE[i]*(LIE_undr*np.reshape(rI[:,i],[N_divide-1,1])) -dt*mIE[i]*(LIE_fire*np.reshape(rI[:,i],[N_divide-1,1]))# 
+        + dt*(etaI*np.dot(LIY_kick,np.reshape(rI[:,i],[N_divide-1,1])) + mIE[i]*np.dot(LIE_kick,np.reshape(rI[:,i],[N_divide-1,1])) + mII[i]*np.dot(LII_kick,np.reshape(rI[:,i],[N_divide-1,1]))))
+        - dt*etaIL*(LIL_undr*np.reshape(rI[:,i],[N_divide-1,1])) - dt*etaIL*(LIL_fire*np.reshape(rI[:,i],[N_divide-1,1]))
+        + dt*(etaIL*np.dot(LIL_kick,np.reshape(rI[:,i],[N_divide-1,1])))
+        
+        rI[j_source,i] = rI[j_source,i] + rIY_fire[i] + rIL_fire[i] + rII_fire[i] + rIE_fire[i]#  
+        # CALCULATING NEW MEE/EI/IE/II
+        mEE[i] = (NE-1)*(rEY_fire[i] + rEL_fire[i] + rEI_fire[i]+ rEE_fire[i])/dt #)/dt #  I HYP EXCITATORY POPULATION WITH ABILITY TO TRIGGER E IN IDENTICAL HYP
+        mIE[i] = (NE-0)*(rEY_fire[i] + rEL_fire[i] + rEI_fire[i]+ rEE_fire[i])/dt #)/dt #  I HYP EXCITATORY POPULATION WITH ABILITY TO TRIGGER I
+        mEI[i] = (NI-0)*(rIY_fire[i] + rIL_fire[i] + rII_fire[i]+ rIE_fire[i])/dt #)/dt #  I HYP INHIBITORY POPULATION
+        mII[i] = (NI-1)*(rIY_fire[i] + rIL_fire[i] + rII_fire[i]+ rIE_fire[i])/dt #)/dt #  I HYP INHIBITORY POPULATION
+        
+        me_single[i] = (rEY_fire[i] + rEI_fire[i]+ rEE_fire[i])/dt #)/dt # 
+        mi_single[i] = (rIY_fire[i] + rII_fire[i]+ rIE_fire[i])/dt #)/dt # 
+    #SAVING AND REFRESHING MEE/EI/IE/II, RE/RI,
+    (Rec.mEE,Rec.mEI,Rec.mIE,Rec.mII) = (mEE,mEI,mIE,mII)
+    (StatV.rE,StatV.rI) = (rE,rI)
+    """
+    """
+    (INE,INI) = Inmdas(Ext,Rec,Net)
+    (Rec.INE,Rec.INI) = (INE,INI)
+    # UPDATE VLN!!! INMDA SHOULD MAKE DIFFERENCE
+    for i in range(NHYP):
+        LE_flow[i,:,:] = get_L_flow(Net,Rec,V,np.squeeze(INE[i,0]))
+        LI_flow[i,:,:] = get_L_flow(Net,Rec,V,np.squeeze(INI[i,0]))
+    # SAVING
+    (StatV.LE_flow,StatV.LI_flow) = (LE_flow,LI_flow)
+
+    
+    counter_dt = counter_dt + 1
+    t = counter_dt * dt
+    if (np.mod(counter_dt,10)==0):
+        print 'ME_SINGLE',me_single
+            
+        
+        
+        
+        
         
